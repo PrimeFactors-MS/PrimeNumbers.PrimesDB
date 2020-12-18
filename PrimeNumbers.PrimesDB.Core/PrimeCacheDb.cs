@@ -19,22 +19,50 @@ namespace PrimeNumbers.PrimesDB.Core
         /// <returns>If a record was found or not</returns>
         public bool TryGetPrimeRecord(ulong number, out PrimeRecord record)
         {
+            MySqlDataReader reader = null;
             var command = new MySqlCommand("SELECT * FROM primefactoring WHERE number = @number LIMIT 1;", _connection);
             command.Parameters.Add("@number", MySqlDbType.UInt64);
             command.Parameters["@number"].Value = number;
-            using MySqlDataReader reader = command.ExecuteReader();
-            
-            if (reader.Read())
+
+            const int NUM_OF_ATTEMPTS = 2;
+
+
+            for (int i = 0; i < NUM_OF_ATTEMPTS; i++)
             {
-                record = GetRecordFromReader(reader);
-                return true;
-            }
-            else
-            {
-                record = null;
-                return false;
+                try
+                {
+                    reader = command.ExecuteReader();
+                    break;
+                }
+                catch (MySqlException ex) when (ex.InnerException is System.IO.IOException)
+                {
+                    reader?.Dispose();
+                    if (i < NUM_OF_ATTEMPTS - 1)
+                    {
+                        _connection.Close();
+                        _connection.Open();
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
             }
 
+            using (reader)
+            {
+
+                if (reader.Read())
+                {
+                    record = GetRecordFromReader(reader);
+                    return true;
+                }
+                else
+                {
+                    record = null;
+                    return false;
+                }
+            }
         }
 
         public void InsertPrimeRecord(PrimeRecord record)
@@ -48,7 +76,28 @@ namespace PrimeNumbers.PrimesDB.Core
             command.Parameters["@isPrime"].Value = record.IsPrime;
             command.Parameters["@primeFactors"].Value = JsonSerializer.Serialize(record.PrimeFactors);
 
-            command.ExecuteNonQuery();
+            const int NUM_OF_ATTEMPTS = 2;
+
+            for (int i = 0; i < NUM_OF_ATTEMPTS; i++)
+            {
+                try
+                {
+                    command.ExecuteNonQuery();
+                    break;
+                }
+                catch (MySqlException ex) when (ex.InnerException is System.IO.IOException)
+                {
+                    if (i < NUM_OF_ATTEMPTS - 1)
+                    {
+                        _connection.Close();
+                        _connection.Open();
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
         }
 
         public void Dispose()
@@ -62,7 +111,7 @@ namespace PrimeNumbers.PrimesDB.Core
             GC.SuppressFinalize(this);
         }
 
-       
+
         private static PrimeRecord GetRecordFromReader(MySqlDataReader reader)
         {
             ulong number = reader.GetUInt64(0);
